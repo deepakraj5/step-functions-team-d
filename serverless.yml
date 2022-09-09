@@ -1,0 +1,70 @@
+service: step-functions
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: dev
+  region: us-east-1
+
+functions:
+  randomNumber:
+    handler: handler.randomNumber
+  randomNumberFromRange:
+    handler: handler.randomNumberFromRange
+
+plugins:
+  - serverless-step-functions
+  - serverless-plugin-common-excludes
+
+stepFunctions:
+  stateMachines:
+    rand:
+      name: rand
+      definition:
+        Comment: 'Step function executing random number lambda function'
+        StartAt: PassNumber
+        States:
+          PassNumber:
+            Type: Pass
+            Next: CalculateMinAndMaxRandomNumber
+          CalculateMinAndMaxRandomNumber:
+            Type: Task
+            Resource: arn:aws:lambda:us-east-1:344185303296:function:step-functions-dev-randomNumber
+            ResultPath: "$.minAndMax"
+            Next: CalculateRandomNumber
+          CalculateRandomNumber:
+            Type: Task
+            Resource: arn:aws:lambda:us-east-1:344185303296:function:step-functions-dev-randomNumberFromRange
+            InputPath: "$.minAndMax"
+            ResultPath: "$.result"
+            Next: WaitForNumber
+          WaitForNumber:
+            Type: Wait
+            Seconds: 5
+            Next: ParallelSNS
+          ParallelSNS:
+            Type: Parallel
+            Branches:
+              - StartAt: Choice
+                States:
+                  Choice:
+                    Type: Choice
+                    Choices: 
+                      - Variable: "$.result.body"
+                        NumericLessThan: 3000
+                        Next: Success
+                      - Variable: "$.result.body"
+                        NumericGreaterThan: 3000
+                        Next: Fail
+                  Success:
+                    Type: Succeed
+                  Fail:
+                    Type: Fail
+              - StartAt: NonTokenSNS
+                States:
+                  NonTokenSNS:
+                    Type: Pass
+                    End: true
+            End: true
